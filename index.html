@@ -100,6 +100,7 @@
       font-weight:700;
       letter-spacing:.2px;
       transition: .2s ease;
+      white-space:nowrap;
     }
     .tab.active{
       color: var(--text);
@@ -383,11 +384,19 @@
     <div class="brand">
       <div class="logo"></div>
       <div>
-        <h1>Crash Cart Tracker</h1>
-        <p class="sub"> Scan/Type crash & badges</p>
+        <h1 id="brandTitle">Crash Cart Tracker</h1>
+        <p class="sub" id="brandSub"> Scan/Type crash & badges</p>
       </div>
     </div>
 
+    <!-- ✅ NEW: Scope tabs (same style) -->
+    <div class="tabs" id="scopeTabs" aria-label="Tracker scope">
+      <button class="tab active" id="scopeCrash" type="button">Crash Cart</button>
+      <button class="tab" id="scopeAna" type="button">Anaphylactic cart</button>
+      <button class="tab" id="scopeCode" type="button">Code blue box</button>
+    </div>
+
+    <!-- Existing view tabs -->
     <div class="tabs">
       <button class="tab active" id="tabEntry" type="button">Entry</button>
       <button class="tab" id="tabReport" type="button">Report</button>
@@ -678,7 +687,6 @@
     </div>
   </section>
 
-  <!-- Location list: free-text is allowed; datalist is just suggestions -->
   <datalist id="locationList">
     <option value="Emergency Department"></option>
     <option value="CSSD"></option>
@@ -763,43 +771,33 @@
   const auth = getAuth(app);
   await signInAnonymously(auth);
 
-  const LOGS_PATH = "crashCart/logs";
-
-  // WRITE
-  window.addLogToFirebase = async (record) => {
-    const newRef = push(ref(db, LOGS_PATH));
+  // ✅ functions now accept path (so each tab uses its own DB folder)
+  window.addLogToFirebase = async (record, path) => {
+    const newRef = push(ref(db, path));
     await set(newRef, record);
   };
 
-  // LIVE READ
-  window.listenFirebaseLogs = (cb) => {
-    onValue(ref(db, LOGS_PATH), snap => {
+  window.listenFirebaseLogs = (path, cb) => {
+    const unsub = onValue(ref(db, path), snap => {
       const data = snap.val() || {};
       const rows = Object.entries(data).map(([k,v]) => ({ _key:k, ...v }));
       rows.sort((a,b)=> (b.timestamp||"").localeCompare(a.timestamp||""));
       cb(rows);
     });
+    return unsub; // 🔥 unsubscribe when switching tabs
   };
 
-  // WIPE ALL
-  window.wipeFirebaseLogs = async () => {
-    await remove(ref(db, LOGS_PATH));
+  window.wipeFirebaseLogs = async (path) => {
+    await remove(ref(db, path));
   };
 </script>
 
 <script>
-  /********************
-   * Storage + Utils  (Firebase instead of localStorage)
-   ********************/
   const ALERT_SOON_DAYS = 7;
-
   const $ = (id)=>document.getElementById(id);
 
-  // All rows come from Firebase listener
   let ALL_ROWS = [];
-
   function loadLogs(){ return ALL_ROWS; }
-  function saveLogs(_rows){ /* no-op */ }
 
   function toast(msg){
     const t = $("toast");
@@ -812,9 +810,7 @@
   function digitsOnly(s){
     return (s || "").match(/\d+/g)?.join("") || "";
   }
-
   function isoNow(){ return new Date().toISOString(); }
-
   function yyyyMmDd(d){
     const x = new Date(d);
     const y = x.getFullYear();
@@ -822,13 +818,11 @@
     const da = String(x.getDate()).padStart(2,"0");
     return `${y}-${m}-${da}`;
   }
-
   function daysUntil(dateStr){
     const today = new Date(); today.setHours(0,0,0,0);
     const d = new Date(dateStr); d.setHours(0,0,0,0);
     return Math.round((d - today) / 86400000);
   }
-
   function expiryStateForSent(expiryDate){
     if(!expiryDate) return "none";
     const dd = daysUntil(expiryDate);
@@ -836,18 +830,71 @@
     if(dd <= ALERT_SOON_DAYS) return "soon";
     return "notsoon";
   }
-
   function formatDateTime(iso){
     const d = new Date(iso);
     return d.toLocaleString([], {year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit"});
   }
-
   function escapeHtml(s){
     return (s||"").replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]));
   }
 
   /********************
-   * Tabs
+   * ✅ NEW: Dataset scopes (separate report + logs)
+   ********************/
+  const SCOPES = {
+    crash: { title: "Crash Cart Tracker", sub: " Scan/Type crash & badges", path: "crashCart/logs" },
+    ana:   { title: "Anaphylactic cart",  sub: " Scan/Type crash & badges", path: "anaphylacticCart/logs" },
+    code:  { title: "Code blue box",      sub: " Scan/Type crash & badges", path: "codeBlueBox/logs" }
+  };
+
+  let currentScopeKey = "crash";
+  let currentPath = SCOPES[currentScopeKey].path;
+  let unsubscribeLogs = null;
+
+  function setScope(key){
+    if(!SCOPES[key]) return;
+    currentScopeKey = key;
+    currentPath = SCOPES[key].path;
+
+    // tabs active UI
+    $("scopeCrash").classList.toggle("active", key==="crash");
+    $("scopeAna").classList.toggle("active", key==="ana");
+    $("scopeCode").classList.toggle("active", key==="code");
+
+    // brand text
+    $("brandTitle").textContent = SCOPES[key].title;
+    $("brandSub").textContent = SCOPES[key].sub;
+
+    // stop old listener
+    if(typeof unsubscribeLogs === "function") {
+      try{ unsubscribeLogs(); }catch(_){}
+      unsubscribeLogs = null;
+    }
+
+    // reset local cache + UI
+    ALL_ROWS = [];
+    renderAlerts();
+    applyFiltersAndRender();
+
+    // start new listener
+    if(window.listenFirebaseLogs){
+      unsubscribeLogs = window.listenFirebaseLogs(currentPath, (rows)=>{
+        ALL_ROWS = rows;
+        renderAlerts();
+        applyFiltersAndRender();
+      });
+      toast("Switched.");
+    } else {
+      toast("Firebase not loaded.");
+    }
+  }
+
+  $("scopeCrash").addEventListener("click", ()=> setScope("crash"));
+  $("scopeAna").addEventListener("click", ()=> setScope("ana"));
+  $("scopeCode").addEventListener("click", ()=> setScope("code"));
+
+  /********************
+   * Tabs (Entry/Report)
    ********************/
   const tabEntry = $("tabEntry");
   const tabReport = $("tabReport");
@@ -912,8 +959,7 @@
   action.addEventListener("change", toggleActionFields);
 
   /********************
-   * Scan/Type rules:
-   * - Crash + badges only
+   * Scan/Type rules
    ********************/
   const crashNumber = $("crashNumber");
   crashNumber.addEventListener("blur", ()=> crashNumber.value = digitsOnly(crashNumber.value));
@@ -938,7 +984,7 @@
   });
 
   /********************
-   * Save (Firebase)
+   * Save (Firebase per-scope)
    ********************/
   $("btnClear").addEventListener("click", ()=>{
     crashNumber.value = "";
@@ -1020,7 +1066,7 @@
 
     try{
       if(!window.addLogToFirebase) throw new Error("Firebase not loaded");
-      await window.addLogToFirebase(record);
+      await window.addLogToFirebase(record, currentPath);
       toast("Saved.");
       $("btnClear").click();
     } catch(e){
@@ -1030,13 +1076,13 @@
   });
 
   /********************
-   * Alerts: only expired or expiring soon for SENT (latest only)
+   * Alerts
    ********************/
   function latestByCrashCart(rows){
     const map = new Map();
     for (const r of rows){
       if (!map.has(r.crashNumber)){
-        map.set(r.crashNumber, r); // newest-first => first is latest
+        map.set(r.crashNumber, r);
       }
     }
     return [...map.values()];
@@ -1280,7 +1326,6 @@
   function applyFiltersAndRender(){
     const all = loadLogs();
     updateSummaryAllRows();
-
     let rows = applyFilters(all);
     rows = sortRows(rows);
     renderTable(rows);
@@ -1328,9 +1373,6 @@
   $("btnPrev").addEventListener("click", ()=>{ page--; applyFiltersAndRender(); });
   $("btnNext").addEventListener("click", ()=>{ page++; applyFiltersAndRender(); });
 
-  /********************
-   * Export CSV
-   ********************/
   function toCsv(rows){
     const headers = ["DateTime","CrashCart","Action","Location","Medication","MedicationExpiry","PharmacistBadge","NurseBadge","ReturnReason"];
     const lines = [headers.join(",")];
@@ -1361,7 +1403,7 @@
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `crash_cart_report_${yyyyMmDd(new Date())}.csv`;
+    a.download = `${currentScopeKey}_report_${yyyyMmDd(new Date())}.csv`;
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -1369,15 +1411,9 @@
     toast("CSV exported.");
   });
 
-  /********************
-   * Print
-   ********************/
   $("btnPrint").addEventListener("click", ()=> window.print());
   $("btnPrintReport").addEventListener("click", ()=> window.print());
 
-  /********************
-   * Wipe All (Firebase)
-   ********************/
   $("btnWipe").addEventListener("click", async ()=>{
     const pwd = prompt("Enter wipe password:");
     if (pwd === null) return;
@@ -1388,7 +1424,7 @@
 
     try{
       if(!window.wipeFirebaseLogs) throw new Error("Firebase not loaded");
-      await window.wipeFirebaseLogs();
+      await window.wipeFirebaseLogs(currentPath);
       toast("All data wiped.");
     } catch(e){
       console.error(e);
@@ -1396,21 +1432,9 @@
     }
   });
 
-  /********************
-   * Init (listen to Firebase)
-   ********************/
+  // init
   toggleActionFields();
-
-  if(window.listenFirebaseLogs){
-    window.listenFirebaseLogs((rows)=>{
-      ALL_ROWS = rows;
-      renderAlerts();
-      applyFiltersAndRender();
-    });
-  } else {
-    toast("Firebase not loaded.");
-  }
-
+  setScope("crash"); // ✅ default
   showEntry();
 </script>
 </body>

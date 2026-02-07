@@ -1047,16 +1047,16 @@
     });
   });
 
-  // Refresh buttons
-  $("btnRefresh").addEventListener("click", ()=>{
-    // hard refresh behavior but keep cart/view
-    setHash(ACTIVE_CART, ACTIVE_VIEW);
-    location.reload();
-  });
-  $("btnRefreshReport").addEventListener("click", ()=>{
-    setHash(ACTIVE_CART, ACTIVE_VIEW);
-    location.reload();
-  });
+function hardRefresh(){
+  // يحافظ على tab الحالي (cart + view)
+  const base = location.origin + location.pathname;
+  const hash = location.hash || "";
+  const bust = v=${Date.now()}; // يكسر الكاش (Ctrl+F5)
+  location.replace(`${base}?${bust}${hash}`);
+}
+
+$("btnRefresh").addEventListener("click", hardRefresh);
+$("btnRefreshReport").addEventListener("click", hardRefresh);
 
   /********************
    * Scan/Type rules: badges + crash numbers only

@@ -1051,12 +1051,13 @@ function hardRefresh(){
   // يحافظ على tab الحالي (cart + view)
   const base = location.origin + location.pathname;
   const hash = location.hash || "";
-  const bust = v=${Date.now()}; // يكسر الكاش (Ctrl+F5)
+  const bust = `v=${Date.now()}`; // ✅ backticks
   location.replace(`${base}?${bust}${hash}`);
 }
 
 $("btnRefresh").addEventListener("click", hardRefresh);
 $("btnRefreshReport").addEventListener("click", hardRefresh);
+
 
   /********************
    * Scan/Type rules: badges + crash numbers only

@@ -1874,7 +1874,7 @@ $("btnRefreshReport").addEventListener("click", hardRefresh);
     $("expiryDate").min = yyyyMmDd(new Date());
     syncSentRequiredUI();
 
-    if(ACTIVE_VIEW === "report") showReport(); else showEntry();
+    if(ACTIVE_VIEW === "tracking") showTracking(); else if(ACTIVE_VIEW === "report") showReport(); else showEntry();
     startFirebaseListener();
   })();
 </script>
@@ -1955,10 +1955,251 @@ $("btnRefreshReport").addEventListener("click", hardRefresh);
   renderTable = function(rows){ const size=parseInt(el('pageSize').value,10)||20; const pages=Math.max(1,Math.ceil(rows.length/size)); if(page>pages) page=pages; if(page<1) page=1; const slice=rows.slice((page-1)*size,(page-1)*size+size); el('resultCount').textContent=`${rows.length} result(s)`; el('pageLabel').textContent=String(page); el('pageMeta').textContent=`Page ${page} / ${pages}`; const st=patchLatest(ALL_ROWS); el('tbody').innerHTML=slice.map(r=>{ const s=digits(r.sentCrash), t=digits(r.returnCrash); const sd=s||(r.sentCrash==='N/A'?'N/A':''); const rd=t||(r.returnCrash==='N/A'?'N/A':''); const sc=s?crashCartColorClassForNumber(s,st):'cc-gray'; const rc=t?crashCartColorClassForNumber(t,st):'cc-gray'; return `<tr><td>${esc(formatDateTime(r.timestamp))}</td><td>${sd?`<span class="ccPill ${sc}">${esc(sd)}</span>`:''}</td><td>${rd?`<span class="ccPill ${rc}">${esc(rd)}</span>`:''}</td><td>${esc(r.location||'')}</td><td>${esc(r.pharmacyLocation||'')}</td><td class="mono">${esc(digits(r.pharmacistBadge)||'')}</td><td class="mono">${esc(digits(r.nurseBadge)||'')}</td><td>${esc(r.firstMedication||'')}</td><td>${esc(displayDate(r.expiryDate)||'')}</td><td>${esc(r.returnReason||'')}</td></tr>`; }).join(''); el('btnPrev').disabled=page<=1; el('btnNext').disabled=page>=pages; };
   const oldApply=applyFilters;
   applyFilters = function(rows){ let out=oldApply(rows); const fp=el('fPharmacyLocation')?.value.trim(); if(fp) out=out.filter(r=>(r.pharmacyLocation||'').toLowerCase().includes(fp.toLowerCase())); return out; };
-  function syncTrackingSnapshots(){ if(!window.__fb) return; const {db,ref,onValue,logsPath}=window.__fb; ['crashCart','pharmacyTracking'].forEach(k=>onValue(ref(db,logsPath(k)),snap=>{ PATCH_SNAPSHOTS[k]=Object.entries(snap.val()||{}).map(([key,v])=>({_key:key,cartKey:v.cartKey||k,...v})); PATCH_ALERT_ROWS=Object.values(PATCH_SNAPSHOTS).flat().sort((a,b)=>(b.timestamp||'').localeCompare(a.timestamp||'')); if(ACTIVE_VIEW==='tracking') renderTracking(); })); }
-  function moveEvents(cc){ const ev=[]; for(const r of PATCH_ALERT_ROWS){ const base=r.location||''; const pharm=r.pharmacyLocation||MAIN_UNIT; if(digits(r.sentCrash)===cc) ev.push({timestamp:r.timestamp,from:r.cartKey==='pharmacyTracking'?base:pharm,to:r.cartKey==='pharmacyTracking'?MAIN_UNIT:base,type:'Sent',row:r}); if(digits(r.returnCrash)===cc) ev.push({timestamp:r.timestamp,from:r.cartKey==='pharmacyTracking'?MAIN_UNIT:base,to:r.cartKey==='pharmacyTracking'?base:pharm,type:'Return',row:r}); } ev.sort((a,b)=>(a.timestamp||'').localeCompare(b.timestamp||'')); const days=parseInt(el('trackRange').value,10)||30; const cut=Date.now()-days*86400000; return ev.filter(e=>new Date(e.timestamp).getTime()>=cut); }
-  window.renderTracking = function(){ const cc=digits(el('trackCrash').value); el('trackCrash').value=cc; const ev=moveEvents(cc); el('trackCount').textContent=`${ev.length} move(s)`; const status=el('trackStatus'), graph=el('trackGraph'); if(!cc){ status.innerHTML='<div class="hint">Search a crash cart number to see current location, medication, and expiry.</div>'; graph.innerHTML='<div class="hint">Enter crash cart number, then search.</div>'; return; } if(!ev.length){ status.innerHTML=`<div class="hint">No movement found for Crash ${esc(cc)} in selected duration.</div>`; graph.innerHTML='<div class="hint">No movement found in selected duration.</div>'; return; } const latest=ev[ev.length-1]; status.innerHTML=`<div class="alertItem"><span class="dot"></span><div><div class="alertText"><b>Crash ${esc(cc)} current location</b></div><div class="alertMeta">${esc(latest.to)}</div></div></div><div class="alertItem"><span class="dot amber"></span><div><div class="alertText"><b>Medication</b></div><div class="alertMeta">${esc(latest.row.firstMedication||'N/A')}</div></div></div><div class="alertItem"><span class="dot red"></span><div><div class="alertText"><b>Expiry Date</b></div><div class="alertMeta">${esc(displayDate(latest.row.expiryDate)||'N/A')}</div></div></div>`; const w=760,h=230,p=42,n=ev.length; const pts=ev.map((e,i)=>{const x=p+(n===1?.5:i/(n-1))*(w-p*2); const y=p+([.62,.30,.45,.72][i%4])*(h-p*2); return {x,y,e,i};}); graph.innerHTML=`<svg viewBox="0 0 ${w} ${h}" style="width:100%;height:260px;display:block;"><polyline points="${pts.map(q=>`${q.x},${q.y}`).join(' ')}" fill="none" stroke="currentColor" stroke-width="3" opacity=".72"/><line x1="${p}" y1="${h-p}" x2="${w-p}" y2="${h-p}" stroke="currentColor" opacity=".18"/><line x1="${p}" y1="${p}" x2="${p}" y2="${h-p}" stroke="currentColor" opacity=".18"/>${pts.map(q=>`<g class="track-point" data-i="${q.i}" style="cursor:pointer"><circle cx="${q.x}" cy="${q.y}" r="8" fill="currentColor"/><text x="${q.x}" y="${q.y-16}" text-anchor="middle" fill="currentColor" font-size="11">${esc(q.e.type)}</text></g>`).join('')}</svg><div class="alertsList">${ev.map((e,i)=>`<div class="alertItem"><span class="dot ${i===ev.length-1?'amber':''}"></span><div><div class="alertText"><b>${esc(e.from)} → ${esc(e.to)}</b></div><div class="alertMeta">${esc(fmt(e.timestamp))} • ${esc(e.type)}</div></div></div>`).join('')}</div>`; graph.querySelectorAll('.track-point').forEach(node=>node.addEventListener('click',()=>{ const e=ev[+node.dataset.i]; status.innerHTML=`<div class="alertItem"><span class="dot amber"></span><div><div class="alertText"><b>${esc(e.from)} → ${esc(e.to)}</b></div><div class="alertMeta">${esc(fmt(e.timestamp))} • ${esc(e.type)}</div></div></div>`; })); };
-  el('btnTrackSearch').addEventListener('click',renderTracking); el('trackRange').addEventListener('change',renderTracking); el('trackCrash').addEventListener('input',()=>el('trackCrash').value=digits(el('trackCrash').value));
+  function syncTrackingSnapshots(){
+    if(!window.__fb) return;
+    const {db,ref,onValue,logsPath}=window.__fb;
+
+    ['crashCart','pharmacyTracking'].forEach(k=>{
+      onValue(ref(db,logsPath(k)),snap=>{
+        PATCH_SNAPSHOTS[k]=Object.entries(snap.val()||{})
+          .map(([key,v])=>({_key:key,cartKey:v.cartKey||k,...v}));
+
+        PATCH_ALERT_ROWS=Object.values(PATCH_SNAPSHOTS)
+          .flat()
+          .sort((a,b)=>(b.timestamp||'').localeCompare(a.timestamp||''));
+
+        if(ACTIVE_VIEW==='tracking') renderTracking();
+      },err=>{
+        console.error(err);
+        toast('Tracking sync failed because rules.');
+      });
+    });
+  }
+
+  function uniqueTrackingRows(){
+    const map = new Map();
+
+    // Primary source: live snapshots from CC wards + CC pharmacy
+    for(const r of PATCH_ALERT_ROWS || []){
+      const key = r._key || r.id || `${r.cartKey || ''}|${r.timestamp || ''}|${r.sentCrash || ''}|${r.returnCrash || ''}`;
+      map.set(key, r);
+    }
+
+    // Fallback/source parity with the visible report:
+    // If the active Report already has rows, include them too.
+    for(const r of ALL_ROWS || []){
+      const key = r._key || r.id || `${r.cartKey || ACTIVE_CART}|${r.timestamp || ''}|${r.sentCrash || ''}|${r.returnCrash || ''}`;
+      map.set(key, {cartKey: r.cartKey || ACTIVE_CART, ...r});
+    }
+
+    return Array.from(map.values())
+      .filter(r => r && r.timestamp)
+      .sort((a,b)=>(a.timestamp||'').localeCompare(b.timestamp||''));
+  }
+
+  function rowInTrackingRange(row){
+    const days = parseInt(el('trackRange').value,10) || 30;
+    const rows = uniqueTrackingRows();
+    const times = rows.map(r=>new Date(r.timestamp).getTime()).filter(Number.isFinite);
+    if(!times.length) return true;
+
+    // Use the newest log as the anchor, not the phone/browser date.
+    // This makes Tracking behave exactly like Report data: if the log exists,
+    // the selected duration is calculated against the newest saved record.
+    const anchor = Math.max(...times);
+    const cut = anchor - days * 86400000;
+    const t = new Date(row.timestamp).getTime();
+    return Number.isFinite(t) && t >= cut && t <= anchor;
+  }
+
+  function movementFromRow(r, cc){
+    const events = [];
+    const cartKey = r.cartKey || '';
+    const sent = digits(r.sentCrash);
+    const ret = digits(r.returnCrash);
+    const location = r.location || '';
+    const pharmacy = r.pharmacyLocation || MAIN_UNIT;
+
+    if(sent === cc){
+      if(cartKey === 'pharmacyTracking'){
+        // CC pharmacy = pharmacy to pharmacy / main unit
+        events.push({
+          timestamp:r.timestamp,
+          from: location || MAIN_UNIT,
+          to: ret && ret === cc ? (location || MAIN_UNIT) : MAIN_UNIT,
+          type:'Sent',
+          row:r
+        });
+      } else {
+        // CC wards = pharmacy/main unit to ward
+        events.push({
+          timestamp:r.timestamp,
+          from: pharmacy || MAIN_UNIT,
+          to: location || 'Ward',
+          type:'Sent',
+          row:r
+        });
+      }
+    }
+
+    if(ret === cc){
+      if(cartKey === 'pharmacyTracking'){
+        // CC pharmacy return = main unit to pharmacy location
+        events.push({
+          timestamp:r.timestamp,
+          from: MAIN_UNIT,
+          to: location || MAIN_UNIT,
+          type:'Return',
+          row:r
+        });
+      } else {
+        // CC wards return = ward to pharmacy/main unit
+        events.push({
+          timestamp:r.timestamp,
+          from: location || 'Ward',
+          to: pharmacy || MAIN_UNIT,
+          type:'Return',
+          row:r
+        });
+      }
+    }
+
+    return events;
+  }
+
+  function moveEvents(cc){
+    if(!cc) return [];
+    const ev = [];
+
+    for(const r of uniqueTrackingRows()){
+      if(!rowInTrackingRange(r)) continue;
+      ev.push(...movementFromRow(r, cc));
+    }
+
+    ev.sort((a,b)=>{
+      const t = (a.timestamp||'').localeCompare(b.timestamp||'');
+      if(t) return t;
+      // If sent and return were recorded in same row, keep sent before return.
+      if(a.type === b.type) return 0;
+      return a.type === 'Sent' ? -1 : 1;
+    });
+
+    return ev;
+  }
+
+  function latestStatusForCrash(cc){
+    const allEvents = [];
+    for(const r of uniqueTrackingRows()){
+      allEvents.push(...movementFromRow(r, cc));
+    }
+    allEvents.sort((a,b)=>{
+      const t = (a.timestamp||'').localeCompare(b.timestamp||'');
+      if(t) return t;
+      if(a.type === b.type) return 0;
+      return a.type === 'Sent' ? -1 : 1;
+    });
+    return allEvents[allEvents.length - 1] || null;
+  }
+
+  function renderStatusCard(cc, eventToHighlight){
+    const latest = latestStatusForCrash(cc);
+    const src = latest || eventToHighlight;
+    if(!src){
+      return `<div class="hint">No current status found for Crash ${esc(cc)}.</div>`;
+    }
+
+    const r = src.row || {};
+    const medication = r.firstMedication && r.firstMedication !== 'N/A' ? r.firstMedication : 'N/A';
+    const expiry = r.expiryDate && r.expiryDate !== 'N/A' ? displayDate(r.expiryDate) : 'N/A';
+
+    const movement = eventToHighlight
+      ? `<div class="alertItem"><span class="dot amber"></span><div><div class="alertText"><b>Selected movement</b></div><div class="alertMeta">${esc(eventToHighlight.from)} → ${esc(eventToHighlight.to)} • ${esc(fmt(eventToHighlight.timestamp))} • ${esc(eventToHighlight.type)}</div></div></div>`
+      : "";
+
+    return `
+      ${movement}
+      <div class="alertItem"><span class="dot"></span><div><div class="alertText"><b>Crash ${esc(cc)} current location</b></div><div class="alertMeta">${esc(latest.to)}</div></div></div>
+      <div class="alertItem"><span class="dot amber"></span><div><div class="alertText"><b>Medication</b></div><div class="alertMeta">${esc(medication)}</div></div></div>
+      <div class="alertItem"><span class="dot red"></span><div><div class="alertText"><b>Expiry Date</b></div><div class="alertMeta">${esc(expiry)}</div></div></div>
+    `;
+  }
+
+  window.renderTracking = function(){
+    const cc = digits(el('trackCrash').value);
+    el('trackCrash').value = cc;
+
+    const ev = moveEvents(cc);
+    el('trackCount').textContent = `${ev.length} move(s)`;
+
+    const status = el('trackStatus');
+    const graph = el('trackGraph');
+
+    if(!cc){
+      status.innerHTML = '<div class="hint">Search a crash cart number to see current location, medication, and expiry.</div>';
+      graph.innerHTML = '<div class="hint">Enter crash cart number, then search.</div>';
+      return;
+    }
+
+    status.innerHTML = renderStatusCard(cc, null);
+
+    if(!ev.length){
+      graph.innerHTML = '<div class="hint">No movement found in selected duration.</div>';
+      return;
+    }
+
+    const w=760, h=250, p=42, n=ev.length;
+    const lanes = {};
+    let laneCount = 0;
+
+    function laneFor(place){
+      const key = place || 'Unknown';
+      if(!(key in lanes)) lanes[key] = laneCount++;
+      return lanes[key];
+    }
+
+    ev.forEach(e=>{ laneFor(e.from); laneFor(e.to); });
+    const denom = Math.max(1, laneCount - 1);
+
+    const pts = ev.map((e,i)=>{
+      const x = p + (n===1 ? .5 : i/(n-1)) * (w-p*2);
+      const y = p + (laneFor(e.to)/denom) * (h-p*2);
+      return {x,y,e,i};
+    });
+
+    graph.innerHTML = `
+      <svg viewBox="0 0 ${w} ${h}" style="width:100%;height:260px;display:block;">
+        <line x1="${p}" y1="${h-p}" x2="${w-p}" y2="${h-p}" stroke="currentColor" opacity=".18"/>
+        <line x1="${p}" y1="${p}" x2="${p}" y2="${h-p}" stroke="currentColor" opacity=".18"/>
+        <polyline points="${pts.map(q=>`${q.x},${q.y}`).join(' ')}" fill="none" stroke="currentColor" stroke-width="3" opacity=".72"/>
+        ${pts.map(q=>`
+          <g class="track-point" data-i="${q.i}" style="cursor:pointer">
+            <circle cx="${q.x}" cy="${q.y}" r="9" fill="currentColor"/>
+            <text x="${q.x}" y="${q.y-16}" text-anchor="middle" fill="currentColor" font-size="11">${esc(q.e.type)}</text>
+          </g>
+        `).join('')}
+      </svg>
+      <div class="alertsList">
+        ${ev.map((e,i)=>`
+          <div class="alertItem">
+            <span class="dot ${i===ev.length-1?'amber':''}"></span>
+            <div>
+              <div class="alertText"><b>${esc(e.from)} → ${esc(e.to)}</b></div>
+              <div class="alertMeta">${esc(fmt(e.timestamp))} • ${esc(e.type)}</div>
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    `;
+
+    graph.querySelectorAll('.track-point').forEach(node=>node.addEventListener('click',()=>{
+      const e = ev[+node.dataset.i];
+      status.innerHTML = renderStatusCard(cc, e);
+    }));
+  };
+
+  el('btnTrackSearch').addEventListener('click',renderTracking);
+  el('trackRange').addEventListener('change',renderTracking);
+  el('trackCrash').addEventListener('input',()=>el('trackCrash').value=digits(el('trackCrash').value));
   el('expiryDate').min = isoToday(); patchLocationOptions(); patchMedicationOptions(); patchLabels(); syncTrackingSnapshots(); setSubtitle();
 })();
 </script>

@@ -682,7 +682,7 @@
               <th data-key="location">Location</th>
               <th data-key="pharmacyLocation">Pharmacy Location</th>
               <th data-key="pharmacistBadge">Pharmacist</th>
-              <th data-key="nurseBadge">Nurse</th>
+              <th data-key="inchargeBadge">In-charge</th>
               <th data-key="firstMedication">Medication</th>
               <th data-key="expiryDate">Medication Expiry</th>
               <th data-key="returnReason">Return Reason</th>
@@ -1769,8 +1769,8 @@ $("btnRefreshReport").addEventListener("click", hardRefresh);
           <td>${sent ? `<span class="ccPill ${sentClass}">${escapeHtml(sent)}</span>` : ""}</td>
           <td>${ret ? `<span class="ccPill ${retClass}">${escapeHtml(ret)}</span>` : ""}</td>
           <td>${escapeHtml(r.location || "")}</td>
-          <td class="mono">${escapeHtml(digitsOnly(r.pharmacistBadge) || "")}</td>
           <td class="mono">${escapeHtml(digitsOnly(r.nurseBadge) || "")}</td>
+          <td class="mono">${escapeHtml(digitsOnly(r.pharmacistBadge) || "")}</td>
           <td>${escapeHtml(r.firstMedication || "")}</td>
           <td>${escapeHtml(displayExpiryDate(r.expiryDate) || "")}</td>
           <td>${escapeHtml(r.returnReason || "")}</td>
